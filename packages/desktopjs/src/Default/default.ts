@@ -3,12 +3,13 @@
  */
 
 import { Container, WebContainerBase } from "../container";
-import { ContainerWindow, PersistedWindowLayout, Rectangle } from "../window";
+import { ContainerWindow, PersistedWindowLayout, Rectangle, WindowEventArgs } from "../window";
 import { ScreenManager, Display, Point } from "../screen";
 import { NotificationOptions } from "../notification";
 import { ObjectTransform, PropertyMap } from "../propertymapping";
 import { Guid } from "../guid";
 import { MessageBus, MessageBusSubscription, MessageBusOptions } from "../ipc";
+import { EventArgs } from "../events";
 
 declare var Notification: any;
 
@@ -125,6 +126,9 @@ export namespace Default {
                 }
 
                 resolve();
+            }).then(() => {
+                this.emit("state-changed", <EventArgs> { name: "state-changed", sender: this, state: state });
+                ContainerWindow.emit("state-changed", <WindowEventArgs> { name: "state-changed", windowId: this.id, state: state } );
             });
         }
 
@@ -377,7 +381,7 @@ export namespace Default {
             });
         }
 
-        public saveLayout(name: string): Promise<PersistedWindowLayout> {
+        public buildLayout(): Promise<PersistedWindowLayout> {
             const layout = new PersistedWindowLayout();
 
             return new Promise<PersistedWindowLayout>((resolve, reject) => {
@@ -385,8 +389,14 @@ export namespace Default {
 
                 this.getAllWindows().then(windows => {
                     windows.forEach(window => {
+                        const nativeWin = window.nativeWindow;
+
+                        const options = nativeWin[Container.windowOptionsPropertyKey];
+                        if (options && "persist" in options && !options.persist) {
+                            return;
+                        }
+
                         promises.push(new Promise<void>(async (innerResolve) => {
-                            const nativeWin = window.nativeWindow;
                             if (this.globalWindow !== nativeWin) {
                                 layout.windows.push(
                                     {
@@ -394,7 +404,7 @@ export namespace Default {
                                         url: nativeWin.location.toString(),
                                         id: window.id,
                                         bounds: { x: nativeWin.screenX, y: nativeWin.screenY, width: nativeWin.outerWidth, height: nativeWin.outerHeight },
-                                        options: nativeWin[Container.windowOptionsPropertyKey],
+                                        options: options,
                                         state: await window.getState()
                                     }
                                 );
@@ -404,9 +414,8 @@ export namespace Default {
                     });
 
                     Promise.all(promises).then(() => {
-                        this.saveLayoutToStorage(name, layout);
                         resolve(layout);
-                    }).catch(reason => reject(reason));
+                    }).catch(reject);
                 });
             });
         }

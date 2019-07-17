@@ -64,7 +64,8 @@ export type WindowEventType =
     "maximize" |
     "minimize" |
     "restore" |
-    "beforeunload";
+    "beforeunload" |
+    "state-changed";
 
 export class WindowEventArgs extends EventArgs {
     public readonly window?: ContainerWindow;
@@ -266,6 +267,11 @@ export interface ContainerWindowManager {
      * @param {string} name - Name of the window layout to load
      */
     loadLayout(name: string): Promise<PersistedWindowLayout>;
+
+    /**
+     * Builds the current window layout
+     */
+    buildLayout(): Promise<PersistedWindowLayout>;
 
     /** Persists a window layout
      * @param {string} name - Name of the window layout to save

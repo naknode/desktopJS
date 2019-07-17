@@ -5,7 +5,8 @@
 import {
     registerContainer, ContainerWindow, PersistedWindowLayout, Rectangle, Container, WebContainerBase,
     ScreenManager, Display, Point, ObjectTransform, PropertyMap, NotificationOptions, ContainerNotification,
-    TrayIconDetails, MenuItem, Guid, MessageBus, MessageBusSubscription, MessageBusOptions, GlobalShortcutManager
+    TrayIconDetails, MenuItem, Guid, MessageBus, MessageBusSubscription, MessageBusOptions, GlobalShortcutManager,
+    EventArgs, WindowEventArgs
 } from "@morgan-stanley/desktopjs";
 
 registerContainer("Electron", {
@@ -203,11 +204,14 @@ export class ElectronContainerWindow extends ContainerWindow {
     }
 
     public setState(state: any): Promise<void> {
-        if (this.innerWindow && this.innerWindow.webContents) {
-            return this.innerWindow.webContents.executeJavaScript(`if (window.setState) { window.setState(JSON.parse(\`${JSON.stringify(state)}\`)); }`);
-        } else {
-            return Promise.resolve();
-        }
+        const promise = (this.innerWindow && this.innerWindow.webContents)
+            ? this.innerWindow.webContents.executeJavaScript(`if (window.setState) { window.setState(JSON.parse(\`${JSON.stringify(state)}\`)); }`)
+            : Promise.resolve();
+
+        return promise.then(() => {
+            this.emit("state-changed", <EventArgs> { name: "state-changed", sender: this, state: state });
+            ContainerWindow.emit("state-changed", <WindowEventArgs> { name: "state-changed", windowId: this.id, state: state } );
+        });
     }
 
     protected attachListener(eventName: string, listener: (...args: any[]) => void): void {
@@ -497,7 +501,7 @@ export class ElectronContainer extends WebContainerBase {
         });
     }
 
-    public saveLayout(name: string): Promise<PersistedWindowLayout> {
+    public buildLayout(): Promise<PersistedWindowLayout> {
         const layout = new PersistedWindowLayout();
         const mainWindow = this.getMainWindow().innerWindow;
         const promises: Promise<void>[] = [];
@@ -505,7 +509,12 @@ export class ElectronContainer extends WebContainerBase {
         return new Promise<PersistedWindowLayout>((resolve, reject) => {
             this.getAllWindows().then(windows => {
                 windows.forEach(window => {
-                    promises.push(new Promise<void>((innerResolve, innerReject) => {
+                    const options = window.innerWindow[Container.windowOptionsPropertyKey];
+                    if (options && "persist" in options && !options.persist) {
+                        return;
+                    }
+
+                    promises.push(new Promise<void>(innerResolve => {
                         window.getGroup().then(async group => {
                             layout.windows.push(
                                 {
@@ -514,7 +523,7 @@ export class ElectronContainer extends WebContainerBase {
                                     url: window.innerWindow.webContents.getURL(),
                                     main: (mainWindow === window.innerWindow),
                                     state: await window.getState(),
-                                    options: window.innerWindow[Container.windowOptionsPropertyKey],
+                                    options: options,
                                     bounds: window.innerWindow.getBounds(),
                                     group: group.map(win => win.id)
                                 });
@@ -524,9 +533,8 @@ export class ElectronContainer extends WebContainerBase {
                 });
 
                 Promise.all(promises).then(() => {
-                    this.saveLayoutToStorage(name, layout);
                     resolve(layout);
-                });
+                }).catch(reject);
             });
         });
     }
